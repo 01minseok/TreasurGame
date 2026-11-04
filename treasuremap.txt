@@ -1,0 +1,851 @@
+package treasure;
+
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.*;
+import java.util.Random;
+import java.util.ArrayList;
+import java.util.List;
+
+class TreasureMap extends JFrame {
+    private static final int STEP = 10;
+    private static int MINE_COUNT = 10;
+    private Timer msgTimer;
+    private final TreasureMain main;
+    private final int tx,ty;
+
+    private final JLabel player = new JLabel("★");   // 캐릭터
+    private ImageIcon playerLeftIcon;                  // 왼쪽 보는 캐릭터
+    private ImageIcon playerRightIcon;
+    // 🔹 얼었을 때 아이콘
+    private ImageIcon playerFreezeLeftIcon;
+    private ImageIcon playerFreezeRightIcon;
+
+    // 🔹 현재 바라보는 방향 / 얼음 상태
+    private boolean facingLeft = false; // 기본은 오른쪽 보고 시작
+    private boolean isFrozen = false;
+
+    private final JLabel coord  = new JLabel();        // 좌표 표시
+    private final JLabel msg = new JLabel("",SwingConstants.CENTER);
+    private JDialog inventoryDialog;
+
+    private boolean invertControls = false; // 방향키 반전 여부
+    private boolean chaserFast = false;     // 추적자 속도 2배 여부
+
+    private InventoryPanel mapInventoryPanel;  // 보물섬 인벤토리 창
+    private JLabel treasureScoreLabel;         // 보물섬 상단 Score 라벨
+
+    private final List<Point> mines = new ArrayList<>();
+    private final List<Point> chests = new ArrayList<>();
+
+    private boolean isSearching = false;
+    private final Image bgImage;
+    private final FieldType fieldType;
+    // 🔹 탐색용 게이지바 + 타이머 관련 필드 추가
+    private JProgressBar searchBar;
+    private javax.swing.Timer searchTimer;
+    private int searchElapsed = 0;
+
+    private boolean foundTreasure = false;
+    private boolean canMove = true; // 이동 가능 여부
+    private Timer iceDebuffTimer;   // 얼음 디버프 타이머
+    private Timer iceFreezeTimer;   // 1초 얼어있는 타이머
+    private Timer forestItemLossTimer;
+
+
+    private JLabel chaser;
+    private Timer chaserTimer;
+
+    public void setChests(List<Point> newChests) {
+        chests.clear();
+        chests.addAll(newChests);
+    }
+    //상자 위치 공유
+    List<Point> getChests() {
+        return chests;
+    }
+    //지뢰 위치 공유
+    List<Point> getMines(){
+        return mines;
+    }
+    // 🔹 필드 타입
+    private enum FieldType {
+        ICE, LAVA,MAINMAP,FOREST
+        // 필요하면 더 추가 (FOREST, DESERT ...)
+    }
+    //메세지 3초
+    private void showMessage(String text){
+        msg.setText(text);
+        if(msgTimer != null && msgTimer.isRunning()){
+            msgTimer.stop();
+        }
+        msgTimer = new Timer(3000, e-> msg.setText(""));
+        msgTimer.setRepeats(false);
+        msgTimer.start();
+    }
+    public TreasureMap(TreasureMain main,int tx, int ty) {
+        this.main = main;
+        this.tx = tx;
+        this.ty = ty;
+
+        ImageIcon chestIcon = new ImageIcon(
+                getClass().getResource("/treasure/icons/chest.png")
+        );
+        ImageIcon mineIcon = new ImageIcon(
+                getClass().getResource("/treasure/icons/mine.png")
+        );
+        playerFreezeLeftIcon = resizeIcon(
+                new ImageIcon(getClass().getResource("/treasure/icons/icemych_left.png")),40,60
+        );
+        playerFreezeRightIcon = resizeIcon(
+                new ImageIcon(getClass().getResource("/treasure/icons/icemych_right.png")),40,60
+        );
+        // 🔹 1) 필드 타입 랜덤 선택
+        FieldType[] types = FieldType.values();
+        // 🔹 2) 타입에 따라 배경 이미지 & 지뢰 개수 변경
+        String bgPath;
+        // 🔹 1) 랜덤 숫자 0~99 생성
+        int r = new Random().nextInt(100);
+
+        // 🔹 2) 가중치 기반 선택
+        if (r < 25) {                    // 0~9 (10%)
+            fieldType = FieldType.ICE;
+            bgPath = "/treasure/icons/icemap.png"; // 얼음 필드
+            MINE_COUNT = 10;
+
+        } else if (r < 50) {             // 10~14 (5%)
+            fieldType = FieldType.LAVA;
+            bgPath = "/treasure/icons/ravamap.png"; // 용암 필드
+            MINE_COUNT = 30; // 예시: 용암 필드는 지뢰 많게
+
+        } else if (r < 75) {             // 15~74 (60%)
+            fieldType = FieldType.FOREST;
+            bgPath = "/treasure/icons/forestmap.png";
+            MINE_COUNT = 10;
+
+        } else {                         // 75~99 (25%)
+            fieldType = FieldType.MAINMAP;
+            bgPath = "/treasure/icons/mainmap.png";
+            MINE_COUNT = 10;
+        }
+
+
+        bgImage = new ImageIcon(getClass().getResource(bgPath)).getImage();
+
+        if (fieldType == FieldType.FOREST) {
+            loseRandomItemOnEnter();
+            startForestItemLossTimer();
+        }
+        setTitle("보물 섬");
+        setSize(656, 699);
+        setLocationRelativeTo(null);
+        setDefaultCloseOperation(DISPOSE_ON_CLOSE);
+
+        JPanel bgPanel = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+
+                int iw = bgImage.getWidth(null);
+                int ih = bgImage.getHeight(null);
+
+                for (int x = 0; x < getWidth(); x += iw) {
+                    for (int y = 0; y < getHeight(); y += ih) {
+                        g.drawImage(bgImage, x, y, iw, ih, this);
+                    }
+                }
+            }
+        };
+        bgPanel.setLayout(null);    // 기존처럼 절대 좌표 배치
+        setContentPane(bgPanel);    // 이 패널을 프레임의 contentPane으로 사용
+
+        setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
+
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+
+                // 보물섬을 나갈 수 없음 — 닫으면 즉시 게임 리셋
+                JOptionPane.showMessageDialog(
+                        TreasureMap.this,
+                        "보물 섬에서 탈출할 수 없습니다!\n게임을 처음부터 다시 시작합니다.",
+                        "경고",
+                        JOptionPane.WARNING_MESSAGE
+                );
+                if (chaserTimer != null) {
+                    chaserTimer.stop();
+                }
+
+                // 현재 보물섬 창 닫기
+                TreasureMap.this.dispose();
+                // 메인 창 닫기
+                main.dispose();
+                // 새로운 게임 시작
+                new TreasureMain();
+            }
+        });
+        // 좌상단 좌표 라벨
+        // ===== 좌상단 좌표 라벨 =====
+        coord.setFont(new Font("맑은 고딕", Font.PLAIN, 16));
+        coord.setForeground(Color.WHITE);
+        coord.setOpaque(false); // 라벨 자체 배경은 없애기
+        JPanel coordPanel = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                        RenderingHints.VALUE_ANTIALIAS_ON);
+
+                // 살짝 반투명한 검정 박스
+                g2.setColor(new Color(0, 0, 0, 120));
+                g2.fillRoundRect(0, 0, getWidth(), getHeight(), 15, 15);
+
+                g2.dispose();
+                super.paintComponent(g);
+            }
+        };
+        coordPanel.setOpaque(false);
+        coordPanel.setLayout(new BorderLayout());
+        coordPanel.setBounds(20, 20, 105, 30); // 필요하면 너가 사이즈 조절
+        coordPanel.add(coord, BorderLayout.CENTER);
+        add(coordPanel);
+
+
+// ===== 우측 상단 점수 라벨 =====
+        treasureScoreLabel = new JLabel("Score: " + main.getScore());
+        treasureScoreLabel.setFont(new Font("맑은 고딕", Font.PLAIN, 14));
+        treasureScoreLabel.setForeground(Color.WHITE);
+        treasureScoreLabel.setOpaque(false);
+
+        JPanel scorePanel = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                        RenderingHints.VALUE_ANTIALIAS_ON);
+
+                g2.setColor(new Color(0, 0, 0, 120));
+                g2.fillRoundRect(0, 0, getWidth(), getHeight(), 15, 15);
+
+                g2.dispose();
+                super.paintComponent(g);
+            }
+        };
+        scorePanel.setOpaque(false);
+        scorePanel.setLayout(new BorderLayout());
+        // 오른쪽 위로 위치 조정 (원래 300,20이었으니까 맵 크기에 맞춰 살짝 조절)
+        scorePanel.setBounds(300, 20, 80, 30);
+        scorePanel.add(treasureScoreLabel, BorderLayout.CENTER);
+        add(scorePanel);
+        // 메세지 라벨
+        msg.setOpaque(false);
+        msg.setForeground(Color.WHITE);
+        msg.setFont(new Font("맑은 고딕", Font.BOLD, 18));
+        msg.setHorizontalAlignment(SwingConstants.CENTER);
+
+// 🔹 메세지 전용 패널 (반투명 박스)
+        JPanel msgPanel = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+                // 반투명 배경 (뒤에 있는 것 안 보일 정도로 진하게)
+                g2.setColor(new Color(0, 0, 0, 120)); // 알파 조절 가능 (0~255)
+                g2.fillRoundRect(0, 0, getWidth(), getHeight(), 20, 20);
+
+                g2.dispose();
+                super.paintComponent(g);
+            }
+        };
+        msgPanel.setOpaque(false);
+        msgPanel.setLayout(new BorderLayout());
+        msgPanel.setBounds(20, 80, 600, 40);
+
+        // 패널 안에 메세지 라벨만 넣기
+        msgPanel.add(msg, BorderLayout.CENTER);
+
+        // 프레임에 붙이기
+        add(msgPanel);
+        //탐색 게이지바
+        searchBar = new JProgressBar(0, 100);
+        searchBar.setBounds(117, 130, 400, 20); // 메시지 라벨 아래쪽
+        searchBar.setStringPainted(true);     // % 텍스트 표시
+        searchBar.setVisible(false);          // 기본은 안 보이게
+        add(searchBar);
+
+        // 캐릭터 라벨
+        playerLeftIcon  = resizeIcon(
+                new ImageIcon(getClass().getResource("/treasure/icons/mych_left.png")),40,60
+        );
+
+        playerRightIcon = resizeIcon(
+                new ImageIcon(getClass().getResource("/treasure/icons/mych_right.png")),40,60
+        );
+
+        player.setSize(40, 60);
+
+        player.setIcon(playerRightIcon);
+        player.setText("");
+
+        // 시작 위치
+        player.setLocation(300, 300);
+        add(player);
+
+        //필드 효과
+        if (fieldType != FieldType.LAVA) {
+            createChaser();
+            startChaserTimer();
+        }
+        if (fieldType == FieldType.ICE) {
+
+            iceDebuffTimer = new Timer(5000, e -> { // 5초마다 실행
+                isFrozen = true;
+                canMove = false; // 이동 금지
+
+                // 바라보는 방향에 따라 얼음 아이콘 적용
+                if (facingLeft) {
+                    player.setIcon(playerFreezeLeftIcon);
+                } else {
+                    player.setIcon(playerFreezeRightIcon);
+                }
+
+                // 1초 뒤에 다시 이동 + 아이콘 원래대로
+                iceFreezeTimer = new Timer(1000, e2 -> {
+                    isFrozen = false;
+                    canMove = true;
+
+                    if (facingLeft) {
+                        player.setIcon(playerLeftIcon);
+                    } else {
+                        player.setIcon(playerRightIcon);
+                    }
+
+                    iceFreezeTimer.stop();
+                });
+                iceFreezeTimer.setRepeats(false);
+                iceFreezeTimer.start();
+            });
+            iceDebuffTimer.start();
+        }
+        generateMines();
+        generateChests();
+        updateCoord(); // 시작 좌표 표시
+
+        // 키 입력 리스너 (↑↓←→)
+        addKeyListener(new KeyAdapter() {
+            private boolean found = false;
+            @Override
+            public void keyPressed(KeyEvent e) {
+                if (!canMove) return;
+
+                int x = player.getX();
+                int y = player.getY();
+
+                switch (e.getKeyCode()) {
+                    case KeyEvent.VK_UP -> {
+                        // 평소: 위로 / 저주: 아래로
+                        y += invertControls ? STEP : -STEP;
+                    }
+                    case KeyEvent.VK_DOWN -> {
+                        // 평소: 아래로 / 저주: 위로
+                        y += invertControls ? -STEP : STEP;
+                    }
+                    case KeyEvent.VK_LEFT -> {
+                        // 평소: 왼쪽 / 저주: 오른쪽
+                        x += invertControls ? STEP : -STEP;
+                        facingLeft = true;
+                        if(!isFrozen) {
+                            player.setIcon(playerLeftIcon);
+                        }
+                    }
+                    case KeyEvent.VK_RIGHT -> {
+                        // 평소: 오른쪽 / 저주: 왼쪽
+                        x += invertControls ? -STEP : STEP;
+                        facingLeft = false;
+                        if(!isFrozen) {
+                            player.setIcon(playerRightIcon);
+                        }
+                    }
+
+
+                    case KeyEvent.VK_I -> {
+                        openInventoryWindow();
+                        return;
+                    }
+
+                    case KeyEvent.VK_SPACE ->{
+
+                        if (isSearching) return;
+                        isSearching = true;
+                        showMessage("탐색중...");
+
+                        searchBar.setValue(0);
+                        searchBar.setVisible(true);
+                        searchElapsed = 0;
+
+                        if (searchTimer != null && searchTimer.isRunning()) {
+                            searchTimer.stop();
+                        }
+
+                        // 1초 뒤에 한 번만 실행되는 타이머
+                        searchTimer = new Timer(50, ev -> {
+                            searchElapsed += 50;
+                            int percent = (int) (searchElapsed / 1000.0 * 100);
+                            if (percent > 100) percent = 100;
+                            searchBar.setValue(percent);
+
+                            if (searchElapsed >= 1000) {
+                                searchTimer.stop();
+                                finishSearch(); // 1초 후 실제 판정 실행
+                            }
+                        });
+                        searchTimer.start();
+
+                        return;
+                    }
+
+                    default -> { return; }
+                }
+
+                // 경계 제한 (프레임 내에서만)
+                x = Math.max(0, Math.min(x, getContentPane().getWidth()  - player.getWidth()));
+                y = Math.max(0, Math.min(y, getContentPane().getHeight() - player.getHeight()));
+
+                if (isMine(x, y)) {
+
+                    if (main.tryReviveWithEMP()) {
+                        showMessage("EMP 부츠가 기능을 다한거 같습니다.");
+                        JOptionPane.showMessageDialog(
+                                TreasureMap.this,
+                                "EMP 부츠가 발동되었습니다 조심하세요",
+                                "구사일생!",
+                                JOptionPane.INFORMATION_MESSAGE
+                        );
+                        return; // 더 이상 죽이지 않음!!
+                    }
+
+                    if (chaserTimer != null) {
+                        chaserTimer.stop();
+                    }
+
+                    showMessage("지뢰를 밟았습니다! 게임 오버...");
+                    JOptionPane.showMessageDialog(
+                            TreasureMap.this,
+                            "지뢰를 밟았습니다!\n게임을 종료합니다.",
+                            "게임 오버",
+                            JOptionPane.ERROR_MESSAGE
+                    );
+                    TreasureMap.this.dispose();
+                    // 메인 프레임(보물 찾기)도 닫기
+                    main.dispose();
+                    // 새 게임 시작 (메인 다시 생성)
+                    new TreasureMain();
+                    return;
+                }
+
+                // 상자 밟았는지 확인
+                if (containsChest(x, y)) {
+                    handleChest(x, y);
+                }
+
+                player.setLocation(x, y);
+                updateCoord();
+                main.setPlayerPosition(player.getX(), player.getY());
+            }
+        });
+
+        // 키 입력 받을 수 있도록 포커스
+        setFocusable(true);
+        setVisible(true);
+        requestFocusInWindow();
+    }
+    private ImageIcon resizeIcon(ImageIcon icon, int width, int height) {
+        Image img = icon.getImage();
+        Image scaled = img.getScaledInstance(width, height, Image.SCALE_SMOOTH);
+        return new ImageIcon(scaled);
+    }
+    private void createChaser() {
+        ImageIcon chaserIcon = new ImageIcon(getClass().getResource("/treasure/icons/monster.png"));
+        Image scaled = chaserIcon.getImage().getScaledInstance(32, 32, Image.SCALE_SMOOTH);
+        chaser = new JLabel(new ImageIcon(scaled));
+        chaser.setSize(32, 32);
+
+        // 플레이어 / 보물 / 지뢰와 겹치지 않는 랜덤 위치 찾기
+        Random r = new Random();
+        int x, y;
+        while (true) {
+            x = r.nextInt(600 / STEP) * STEP;
+            y = r.nextInt(600 / STEP) * STEP;
+
+            // 보물 위치랑 겹치면 X
+            if (x == tx && y == ty) continue;
+            // 플레이어 위치랑 겹치면 X
+            if (x == player.getX() && y == player.getY()) continue;
+            // 지뢰 위치랑 겹치면 X
+            if (containsMine(x, y)) continue;
+
+            break;
+        }
+
+        chaser.setLocation(x, y);
+        add(chaser);
+    }
+    private void finishSearch() {
+        isSearching = false;
+        searchBar.setVisible(false);  // 게이지바 숨기기
+
+        setFocusable(true);
+        requestFocusInWindow();
+
+        int px = player.getX();
+        int py = player.getY();
+
+        if (!foundTreasure && px == tx && py == ty) {
+            foundTreasure = true;
+
+            // 🔹 추적자 멈추기
+            if (chaserTimer != null) {
+                chaserTimer.stop();
+            }
+
+            // 🔹 메인에서 게임 시작 시각 가져와서 경과 시간 계산
+            long elapsedMs = System.currentTimeMillis() - main.getStartTime();
+            double elapsedSec = elapsedMs / 1000.0;
+
+            // 🔹 결과 메시지
+            String resultMsg = String.format(
+                    "보물을 찾았습니다!\n\n최종 점수: %d\n플레이 시간: %.1f초",
+                    main.getScore(),
+                    elapsedSec
+            );
+
+            // 🔹 클리어 창 띄우기
+            JOptionPane.showMessageDialog(
+                    this,
+                    resultMsg,
+                    "게임 클리어",
+                    JOptionPane.INFORMATION_MESSAGE
+            );
+
+            Leaderboard.recordScore(main, main.getScore());
+
+            // 🔹 현재 게임(메인 + 보물섬) 종료 후 → 새 게임 시작
+            dispose();       // 보물섬 창 닫기
+            main.dispose();  // 기존 TreasureMain 닫기
+            new TreasureMain(); // 새 메인 화면 = 새 게임 시작
+
+        } else if (!foundTreasure) {
+            msg.setText("아무것도 없는거 같다..");
+            // 필요하면 3초 후 메시지 삭제 타이머 써도 됨
+        }
+    }
+    // 추적자 이동 타이머 시작
+    private void startChaserTimer() {
+        int delay = chaserFast ? 250 : 500; // 기본 500ms, 저주면 250ms
+        chaserTimer = new javax.swing.Timer(delay, e -> moveChaser());
+        chaserTimer.start();
+    }
+    // 플레이어를 향해 한 칸씩 이동
+    private void moveChaser() {
+        if (chaser == null || !isDisplayable()) return;
+
+        int ex = chaser.getX();
+        int ey = chaser.getY();
+        int px = player.getX();
+        int py = player.getY();
+
+        // X축 방향으로 한 칸 이동
+        if (px > ex)      ex += STEP;
+        else if (px < ex) ex -= STEP;
+
+        // Y축 방향으로 한 칸 이동
+        if (py > ey)      ey += STEP;
+        else if (py < ey) ey -= STEP;
+
+        chaser.setLocation(ex, ey);
+
+        // 플레이어와 추적자가 같은 칸에 오면 잡힌 것
+        if (ex == px && ey == py) {
+            onCaughtByChaser();
+        }
+    }
+    // 추적자에게 잡혔을 때
+    private void onCaughtByChaser() {
+        if (chaserTimer != null) {
+            chaserTimer.stop();
+        }
+
+        showMessage("추적자에게 잡혔습니다! 게임 오버...");
+
+        JOptionPane.showMessageDialog(
+                this,
+                "추적자에게 잡혔습니다!\n게임을 종료합니다.",
+                "게임 오버",
+                JOptionPane.ERROR_MESSAGE
+        );
+
+        // 맵 닫고 메인도 닫고 새 게임 시작
+        dispose();
+        main.dispose();
+        new TreasureMain();
+    }
+    //지뢰 생성
+    private void generateMines() {
+        Random r = new Random();
+
+        while (mines.size() < MINE_COUNT) {
+            // 0~900 범위에서 STEP 단위로 배치 (보물 좌표랑 규칙 맞춤)
+            int mx = r.nextInt(600 / STEP) * STEP;
+            int my = r.nextInt(600 / STEP) * STEP;
+
+            // 보물 위치랑 겹치지 않게
+            if (mx == tx && my == ty) continue;
+            // 이미 있는 지뢰랑 겹치지 않게
+            if (containsMine(mx, my)) continue;
+
+            mines.add(new Point(mx, my));
+        }
+    }
+    private void generateChests() {
+        Random r = new Random();
+        chests.clear();
+
+        // 예: 상자 10개 자동 생성
+        final int CHEST_COUNT = 10;
+
+        while (chests.size() < CHEST_COUNT) {
+            // 보물섬 창 크기(600x600)에 맞춰 STEP 단위로 좌표 생성
+            int cx = r.nextInt(600 / STEP) * STEP;
+            int cy = r.nextInt(600 / STEP) * STEP;
+
+            // 1. 보물 위치는 피하기
+            if (cx == tx && cy == ty) continue;
+
+            // 2. 지뢰 위치 피하기
+            if (containsMine(cx, cy)) continue;
+
+            // 3. 플레이어 시작 위치 피하기
+            if (cx == player.getX() && cy == player.getY()) continue;
+
+            // 4. 이미 있는 상자랑 겹치지 않도록
+            boolean dup = false;
+            for (Point p : chests) {
+                if (p.x == cx && p.y == cy) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup) continue;
+
+            // 조건 다 통과하면 상자 하나 추가
+            chests.add(new Point(cx, cy));
+        }
+    }
+
+    private boolean containsMine(int x, int y) {
+        for (Point p : mines) {
+            if (p.x == x && p.y == y) return true;
+        }
+        return false;
+    }
+
+    // 🔹 현재 좌표가 지뢰인지 확인
+    private boolean isMine(int x, int y) {
+        return containsMine(x, y);
+    }
+
+    private void openInventoryWindow() {
+        // 이미 열려 있으면 앞으로만 가져오기
+        if (inventoryDialog != null && inventoryDialog.isDisplayable()) {
+            inventoryDialog.setVisible(true);
+            inventoryDialog.toFront();
+            return;
+        }
+
+        inventoryDialog = new JDialog(this, "인벤토리", false); // false = 모달 아님 (맵 뒤에 안 막음)
+        mapInventoryPanel = new InventoryPanel(main.getInventory(), main);
+
+        inventoryDialog.add(mapInventoryPanel);
+        inventoryDialog.pack(); // 패널 크기에 맞게 창 크기 조절
+        inventoryDialog.setLocationRelativeTo(this); // 맵 기준 가운데 배치
+        inventoryDialog.setVisible(true);
+    }
+
+    private boolean containsChest(int x, int y) {
+        for (Point p : chests) {
+            if (p.x == x && p.y == y) return true;
+        }
+        return false;
+    }
+    //상자 보상
+    private void handleChest(int x, int y) {
+        // 1. 상자 삭제
+        Point target = null;
+        for (Point p : chests) {
+            if (p.x == x && p.y == y) {
+                target = p;
+                break;
+            }
+        }
+        if (target != null) {
+            chests.remove(target);
+        }
+
+        Random r = new Random();
+        int roll = r.nextInt(100); // 0 ~ 99
+
+        if (roll < 30) {                      // 0 ~ 29  → 30%
+            // 점수 +100
+            main.addScore(100);
+            showMessage("상자를 열어 보너스! Score +100");
+        } else if (roll < 80) {              // 30 ~ 79 → 50%
+            // 랜덤 아이템
+            giveRandomItemFromChest();
+            showMessage("상자에서 아이템을 얻었습니다!");
+        } else if (roll < 90) {              // 80 ~ 89 → 10%
+            // 저주 1: 방향키 반전
+            applyReverseControlsCurse();
+        } else {                             // 90 ~ 99 → 10%
+            // 저주 2: 적 속도 2배
+            applyFastChaserCurse();
+        }
+    }
+    private void giveRandomItemFromChest() {
+        // 1. 메인 인벤토리 가져오기
+        Inventory inv = main.getInventory();
+
+        // 2. 상점에서 랜덤 아이템 하나 생성
+        Item reward = main.getShop().createRandomItem();
+
+        if (reward == null) {
+            // 혹시라도 null 나오면 그냥 리턴
+            return;
+        }
+
+        // 3. 인벤토리에 추가
+        if (inv.addItem(reward)) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "'" + reward.name + "' 아이템을 인벤토리에 획득했습니다!",
+                    "상자 보상",
+                    JOptionPane.INFORMATION_MESSAGE
+            );
+
+            // 4. 메인 화면 인벤토리 패널 새로고침
+            main.refreshInventoryPanel();
+
+            if (mapInventoryPanel != null) {
+                mapInventoryPanel.refresh();
+            }
+
+        } else {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "인벤토리가 꽉 차서 아이템을 얻지 못했습니다...",
+                    "인벤토리 가득 참",
+                    JOptionPane.WARNING_MESSAGE
+            );
+        }
+    }
+    public void refreshScore() {
+        if (treasureScoreLabel != null) {
+            treasureScoreLabel.setText("Score: " + main.getScore());
+        }
+    }
+    public void refreshMapInventory() {
+        if (mapInventoryPanel != null) {
+            mapInventoryPanel.refresh();
+        }
+    }
+    private void updateCoord() {
+        coord.setText("X: " + player.getX() + "  Y: " + player.getY());
+    }
+    // FOREST: 입장 즉시 랜덤 아이템 삭제
+    private void loseRandomItemOnEnter() {
+        Inventory inv = main.getInventory();
+        Random r = new Random();
+
+        // 빈 슬롯 확인
+        int slots = inv.getMaxSlots();
+        int randomIndex = r.nextInt(slots);
+
+        Item target = inv.getItem(randomIndex);
+        if (target != null) {
+            inv.removeItem(randomIndex);
+            showMessage("숲의 저주! 아이템을 하나 잃었습니다...");
+            main.refreshInventoryPanel();
+            refreshMapInventory();
+        } else {
+            showMessage("숲이 아이템을 노렸지만... 아무 것도 없었습니다.");
+        }
+    }
+    // FOREST: 1분마다 아이템 하나 삭제
+    private void startForestItemLossTimer() {
+        forestItemLossTimer = new Timer(60000, e -> {
+            loseRandomItemOnEnter();
+
+            // 아이템 다 없어지면 멈춤
+            if (main.getInventory().isAllEmpty()) {
+                forestItemLossTimer.stop();
+                JOptionPane.showMessageDialog(
+                        this,
+                        "숲의 저주로 모든 아이템을 잃었습니다...",
+                        "아이템 전부 소실",
+                        JOptionPane.WARNING_MESSAGE
+                );
+            }
+        });
+        forestItemLossTimer.start();
+    }
+    private void applyReverseControlsCurse() {
+        invertControls = true;
+
+        showMessage("저주! 방향키가 반대로 바뀌었습니다!");
+        JOptionPane.showMessageDialog(
+                this,
+                "상자에서 저주가 나왔습니다...\n이제 방향키가 상하좌우 반대로 작동합니다!",
+                "방향키 저주",
+                JOptionPane.WARNING_MESSAGE
+        );
+    }
+
+    // 저주 2: 추적자 속도 2배
+    private void applyFastChaserCurse() {
+        chaserFast = true;
+
+        if (chaserTimer != null) {
+            chaserTimer.setDelay(250);       // 2배 속도
+            chaserTimer.setInitialDelay(0);
+        }
+
+        showMessage("저주! 추적자의 속도가 빨라졌습니다!");
+        JOptionPane.showMessageDialog(
+                this,
+                "상자에서 저주가 나왔습니다...\n추적자가 두 배 빠르게 움직입니다!",
+                "추적자 속도 저주",
+                JOptionPane.WARNING_MESSAGE
+        );
+    }
+    public void freezeChaserFor(int ms) {
+        if (chaserTimer == null) return; // 추적자가 없으면 무시
+
+        chaserTimer.stop();
+        showMessage("추적자가 얼어붙었습니다!");
+
+        // ms 밀리초 후 다시 재가동
+        new Timer(ms, e -> {
+            startChaserTimer();
+            showMessage("추적자가 다시 움직입니다!");
+        }).start();
+    }
+    @Override
+    public void dispose() {
+        super.dispose();
+
+        // 숲 타이머 정지
+        if (forestItemLossTimer != null && forestItemLossTimer.isRunning()) {
+            forestItemLossTimer.stop();
+        }
+    }
+}

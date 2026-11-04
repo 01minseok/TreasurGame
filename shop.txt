@@ -1,0 +1,553 @@
+package treasure;
+
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.*;
+import java.util.Random;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Supplier;
+
+public class Shop {
+    private final TreasureMain main;
+    private final Random rnd = new Random();
+
+    // 보물섬에서 사용하는 표시용 상수들 (지뢰/상자 표시)
+    private static final int MARKER_SIZE = 30;
+    private final ImageIcon chestMarkerIcon =
+            loadMarkerIcon("/treasure/icons/chest.png");
+    private final ImageIcon mineMarkerIcon  =
+            loadMarkerIcon("/treasure/icons/mine.png");
+
+    public Shop(TreasureMain main) {
+        this.main = main;
+    }
+
+    // ──────────────────────────────────────────────
+    //  랜덤 아이템 생성 (상자 보상용) - 외부에서 사용
+    // ──────────────────────────────────────────────
+    public Item createRandomItem() {
+        int type = rnd.nextInt(5); // 현재 아이템 5개
+
+        switch (type) {
+            case 0:  return makeMapItem();
+            case 1:  return makeTreasureDetectorItem();
+            case 2:  return makeMineSearchItem();
+            case 3:  return makeDefuseItem();
+            case 4:  return makeEMPItem();
+            default: return makeMapItem();
+        }
+    }
+
+    // ──────────────────────────────────────────────
+    //  상점 열기
+    // ──────────────────────────────────────────────
+    public void open() {
+        JDialog shop = new JDialog(main, "상점", true);
+        shop.setSize(650, 520);
+        shop.setLocationRelativeTo(main);
+        shop.setLayout(new BorderLayout(15, 15));
+
+        // ─── 상단 헤더 (제목 + 골드 표시) ────────────────────────
+        JPanel header = new JPanel(new BorderLayout());
+        header.setBackground(new Color(255, 248, 230));
+        header.setBorder(new javax.swing.border.EmptyBorder(10, 15, 10, 15));
+
+        JLabel titleLabel = new JLabel("상점");
+        titleLabel.setFont(new Font("맑은 고딕", Font.BOLD, 26));
+
+        JLabel goldLabel = new JLabel("보유 골드 : " + main.getGold() + " G");
+        goldLabel.setFont(new Font("맑은 고딕", Font.BOLD, 16));
+
+        header.add(titleLabel, BorderLayout.WEST);
+        header.add(goldLabel, BorderLayout.EAST);
+
+        // ─── 상점 아이템 목록 데이터 구성 ────────────────────────
+        DefaultListModel<ShopEntry> model = new DefaultListModel<>();
+
+        // 아이콘 로드 (null이면 그냥 텍스트만 보여줌)
+        ImageIcon mapIcon = loadIcon("/treasure/icons/map_item.png");
+        ImageIcon treasuresrIcon = loadIcon("/treasure/icons/treasuresr_item.png");
+        ImageIcon minesrIcon = loadIcon("/treasure/icons/minesr_item.png");
+        ImageIcon minedeIcon = loadIcon("/treasure/icons/minede_item.png");
+        ImageIcon empboIcon = loadIcon("/treasure/icons/empbo_item.png");
+        ImageIcon freezeMonsterIcon = loadIcon("/treasure/icons/stop_item.png");
+        // 상점에서 판매하는 아이템들 정의
+        model.addElement(new ShopEntry(
+                "지도",
+                "보물의 X 또는 Y 좌표 중 하나를 보여줍니다.",
+                10000,
+                mapIcon,
+                this::makeMapItem
+        ));
+        model.addElement(new ShopEntry(
+                "보물 탐지기",
+                "보물의 대략적인 방향을 알려줍니다.",
+                2500,
+                treasuresrIcon,
+                this::makeTreasureDetectorItem
+        ));
+        model.addElement(new ShopEntry(
+                "금속 탐색기",
+                "30초 동안 모든 지뢰 위치와 상자 를 맵에 표시합니다.",
+                1000,
+                minesrIcon,
+                this::makeMineSearchItem
+        ));
+        model.addElement(new ShopEntry(
+                "지뢰 해체기",
+                "현재 위치를 중심으로 100x100 범위의 지뢰를 제거합니다.",
+                500,
+                minedeIcon,
+                this::makeDefuseItem
+        ));
+        model.addElement(new ShopEntry(
+                "EMP 부츠",
+                "지뢰를 한 번 무효화 시킵니다.",
+                2000,
+                empboIcon,
+                this::makeEMPItem
+        ));
+        model.addElement(new ShopEntry(
+                "멈춰",
+                "10초 동안 추적자를 멈춥니다.",
+                1000,
+                freezeMonsterIcon,
+                this::makeChaserFreezeItem
+        ));
+
+        // ─── JList + 렌더러 ──────────────────────────────────────
+        JList<ShopEntry> itemList = new JList<>(model);
+        itemList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        itemList.setVisibleRowCount(8);
+        itemList.setFont(new Font("맑은 고딕", Font.PLAIN, 14));
+
+        // 커스텀 렌더러 (아이콘 + 이름 + 가격)
+        itemList.setCellRenderer(new ShopEntryRenderer());
+
+        JScrollPane scroll = new JScrollPane(itemList);
+        scroll.setBorder(BorderFactory.createTitledBorder("구매 가능한 아이템"));
+
+        // ─── 선택된 아이템 상세 설명 영역 ────────────────────────
+        JTextArea infoArea = new JTextArea();
+        infoArea.setEditable(false);
+        infoArea.setLineWrap(true);
+        infoArea.setWrapStyleWord(true);
+        infoArea.setFont(new Font("맑은 고딕", Font.PLAIN, 13));
+        infoArea.setBorder(new javax.swing.border.EmptyBorder(8, 8, 8, 8));
+
+        itemList.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                ShopEntry entry = itemList.getSelectedValue();
+                if (entry != null) {
+                    infoArea.setText(
+                            "이름 : " + entry.name + "\n" +
+                                    "가격 : " + entry.price + " G\n\n" +
+                                    entry.description
+                    );
+                } else {
+                    infoArea.setText("아이템을 선택하면 설명이 표시됩니다.");
+                }
+            }
+        });
+
+        JPanel centerPanel = new JPanel(new BorderLayout(10, 10));
+        centerPanel.setBorder(new javax.swing.border.EmptyBorder(0, 15, 0, 15));
+        centerPanel.add(scroll, BorderLayout.CENTER);
+        centerPanel.add(new JScrollPane(infoArea), BorderLayout.SOUTH);
+
+        // ─── 하단 버튼 (닫기 / 구매) ─────────────────────────────
+        JButton buyBtn = new JButton("구매하기");
+        JButton closeBtn = new JButton("닫기");
+
+        buyBtn.setFont(new Font("맑은 고딕", Font.BOLD, 16));
+        closeBtn.setFont(new Font("맑은 고딕", Font.PLAIN, 14));
+
+        JPanel bottom = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 10));
+        bottom.add(closeBtn);
+        bottom.add(buyBtn);
+
+        // 구매 버튼 동작
+        buyBtn.addActionListener(e -> {
+            ShopEntry entry = itemList.getSelectedValue();
+            if (entry == null) {
+                JOptionPane.showMessageDialog(
+                        shop,
+                        "아이템을 선택하세요.",
+                        "선택 오류",
+                        JOptionPane.WARNING_MESSAGE
+                );
+                return;
+            }
+
+            handlePurchase(shop, entry);
+            // 골드 라벨 갱신
+            goldLabel.setText("보유 골드 : " + main.getGold() + " G");
+        });
+
+        // 닫기 버튼 동작
+        closeBtn.addActionListener(e -> shop.dispose());
+
+        // 다이얼로그에 배치
+        shop.add(header, BorderLayout.NORTH);
+        shop.add(centerPanel, BorderLayout.CENTER);
+        shop.add(bottom, BorderLayout.SOUTH);
+
+        // 처음에 첫 번째 아이템 선택해두기
+        if (!model.isEmpty()) {
+            itemList.setSelectedIndex(0);
+        }
+
+        shop.setVisible(true);
+    }
+
+    // ──────────────────────────────────────────────
+    //  아이템 구매 공통 처리
+    // ──────────────────────────────────────────────
+    private void handlePurchase(Component parent, ShopEntry entry) {
+        int price = entry.price;
+
+        // 골드 체크 (공통)
+        if (!main.checkBet(price)) {
+            return;
+        }
+
+        // 골드 차감
+        main.setGold(main.getGold() - price);
+
+        // 실제 게임 아이템 생성
+        Item item = entry.itemFactory.get();
+        Inventory inv = main.getInventory();
+
+        if (inv.addItem(item)) {
+            JOptionPane.showMessageDialog(
+                    parent,
+                    "'" + entry.name + "' 아이템이 인벤토리에 추가되었습니다.",
+                    "구매 완료",
+                    JOptionPane.INFORMATION_MESSAGE
+            );
+            main.refreshInventoryPanel();
+        } else {
+            // 인벤토리 꽉찬 경우 → 골드 환불
+            main.setGold(main.getGold() + price);
+            JOptionPane.showMessageDialog(
+                    parent,
+                    "인벤토리가 꽉 찼습니다! (최대 " + inv.getMaxSlots() + "개)",
+                    "인벤토리 가득 참",
+                    JOptionPane.WARNING_MESSAGE
+            );
+        }
+    }
+
+    // ──────────────────────────────────────────────
+    //  아이템 공장 메서드들 (실제 Item 생성)
+    // ──────────────────────────────────────────────
+
+    // 1. 지도
+    public Item makeMapItem() {
+        return new Item(
+                "지도",
+                "보물의 X 또는 Y 좌표 중 하나를 보여줍니다.",
+                () -> {
+                    boolean revealX = rnd.nextBoolean();
+                    String msg = revealX
+                            ? ("보물의 X좌표는: " + main.getTreasureX())
+                            : ("보물의 Y좌표는: " + main.getTreasureY());
+                    JOptionPane.showMessageDialog(
+                            null,
+                            msg,
+                            "지도 사용",
+                            JOptionPane.INFORMATION_MESSAGE
+                    );
+                }
+        );
+    }
+
+    // 2. 보물 탐지기
+    public Item makeTreasureDetectorItem() {
+        return new Item(
+                "보물 탐지기",
+                "보물의 방향을 알려줍니다.",
+                () -> {
+                    int px = main.getPlayerX();
+                    int py = main.getPlayerY();
+                    int tx = main.getTreasureX();
+                    int ty = main.getTreasureY();
+
+                    int dx = tx - px;
+                    int dy = ty - py;
+
+                    String dirX = dx > 0 ? "→" : (dx < 0 ? "←" : "");
+                    String dirY = dy > 0 ? "↓" : (dy < 0 ? "↑" : "");
+
+                    String msg;
+                    if (dirX.isEmpty() && dirY.isEmpty()) {
+                        msg = "지금 있는 자리 근처에 보물이 있습니다!";
+                    } else if (dirX.isEmpty()) {
+                        msg = "보물은 " + dirY + " 방향에 있습니다.";
+                    } else if (dirY.isEmpty()) {
+                        msg = "보물은 " + dirX + " 방향에 있습니다.";
+                    } else {
+                        msg = "보물은 " + dirY + " " + dirX + " 방향에 있습니다.";
+                    }
+
+                    JOptionPane.showMessageDialog(
+                            null,
+                            msg,
+                            "보물 탐지기",
+                            JOptionPane.INFORMATION_MESSAGE
+                    );
+                }
+        );
+    }
+    // 3. 지뢰 탐색기
+    public Item makeMineSearchItem() {
+        return new Item(
+                "금속 탐색기",
+                "30초 동안 지뢰 위치와 상자를 보여줍니다.", // 문구도 살짝 수정
+                () -> {
+                    TreasureMap map = main.getTreasureMap();
+                    if (map == null) {
+                        JOptionPane.showMessageDialog(
+                                main,
+                                "보물섬이 열려 있지 않습니다.",
+                                "오류",
+                                JOptionPane.ERROR_MESSAGE
+                        );
+                        return;
+                    }
+
+                    // ⬇ 기존 지뢰/상자 정보 가져오기
+                    List<Point> mines = map.getMines();
+                    List<Point> chestList = map.getChests();
+
+                    Container content = map.getContentPane();
+                    List<JLabel> tempLabels = new ArrayList<>();
+
+                    // ⭐ 상자 표시
+                    for (Point t : chestList) {
+                        JLabel chest = new JLabel(chestMarkerIcon);
+                        chest.setBounds(t.x+10,t.y+30, chestMarkerIcon.getIconWidth(), chestMarkerIcon.getIconHeight());
+                        content.add(chest);
+                        tempLabels.add(chest);
+                    }
+
+                    // ⭐ 지뢰 표시
+                    for (Point p : mines) {
+                        JLabel mineLabel = new JLabel(mineMarkerIcon);
+                        mineLabel.setBounds(p.x+10, p.y+30,mineMarkerIcon.getIconWidth(), mineMarkerIcon.getIconHeight());
+                        content.add(mineLabel);
+                        tempLabels.add(mineLabel);
+                    }
+
+                    map.repaint();
+
+                    // 30초 후 표시 제거
+                    Timer timer = new Timer(30_000, e -> {
+                        for (JLabel lbl : tempLabels) {
+                            content.remove(lbl);
+                        }
+                        content.revalidate();
+                        content.repaint();
+                    });
+                    timer.setRepeats(false);
+                    timer.start();
+                }
+        );
+    }
+
+
+    // 4. 지뢰 해체기
+    public Item makeDefuseItem() {
+        return new Item(
+                "지뢰 해체기",
+                "현재 위치를 중심으로 100x100 범위의 지뢰를 모두 제거합니다.",
+                () -> {
+                    TreasureMap map = main.getTreasureMap();
+                    if (map == null) {
+                        JOptionPane.showMessageDialog(
+                                main,
+                                "보물섬이 열려 있지 않습니다.",
+                                "오류",
+                                JOptionPane.ERROR_MESSAGE
+                        );
+                        return;
+                    }
+
+                    List<Point> mines = map.getMines();
+
+                    int px = main.getPlayerX();
+                    int py = main.getPlayerY();
+
+                    int range = 50;
+                    int minX = px - range;
+                    int maxX = px + range;
+                    int minY = py - range;
+                    int maxY = py + range;
+
+                    int removed = 0;
+
+                    java.util.Iterator<Point> it = mines.iterator();
+                    while (it.hasNext()) {
+                        Point p = it.next();
+                        if (p.x >= minX && p.x <= maxX &&
+                                p.y >= minY && p.y <= maxY) {
+                            it.remove();
+                            removed++;
+                        }
+                    }
+
+                    String msg;
+                    if (removed == 0) {
+                        msg = "근처 100x100 범위 안에 제거할 지뢰가 없습니다.";
+                    } else {
+                        msg = "주변 100x100 범위에서 지뢰 " + removed + "개를 제거했습니다!";
+                    }
+
+                    JOptionPane.showMessageDialog(
+                            null,
+                            msg,
+                            "지뢰 해체기",
+                            JOptionPane.INFORMATION_MESSAGE
+                    );
+                }
+        );
+    }
+
+    // 5. EMP 부츠
+    public Item makeEMPItem() {
+        return new Item(
+                "EMP 부츠",
+                "지뢰를 밟아도 한 번 부활합니다. (자동 발동)",
+                () -> JOptionPane.showMessageDialog(
+                        main,
+                        "EMP 부츠는 지뢰를 밟았을 때 자동으로 발동합니다.\n" +
+                                "보물섬에서 한 번 죽음을 대신 막아줍니다.",
+                        "EMP 부츠",
+                        JOptionPane.INFORMATION_MESSAGE
+                )
+        );
+    }
+    //6. 멈춰
+    public Item makeChaserFreezeItem() {
+        return new Item(
+                "멈춰",
+                "추적자를 10초간 멈춥니다.",
+                () -> {
+                    TreasureMap map = main.getTreasureMap();
+                    if (map == null) return;
+
+                    map.freezeChaserFor(10000); // 10초(10000ms)
+                }
+        );
+    }
+
+    // ──────────────────────────────────────────────
+    //  내부용 클래스 & 유틸
+    // ──────────────────────────────────────────────
+
+    /** 상점에서 하나의 줄(아이템)을 표현하는 데이터 */
+    private static class ShopEntry {
+        final String name;
+        final String description;
+        final int price;
+        final Icon icon;                 // null 일 수도 있음
+        final Supplier<Item> itemFactory;
+
+        ShopEntry(String name,
+                  String description,
+                  int price,
+                  Icon icon,
+                  Supplier<Item> itemFactory) {
+            this.name = name;
+            this.description = description;
+            this.price = price;
+            this.icon = icon;
+            this.itemFactory = itemFactory;
+        }
+
+        @Override
+        public String toString() {
+            return name;
+        }
+    }
+
+    /** JList용 커스텀 렌더러 (아이콘 + 이름 + 가격 한 줄에 표시) */
+    private static class ShopEntryRenderer extends JPanel implements ListCellRenderer<ShopEntry> {
+        private final JLabel iconLabel  = new JLabel();
+        private final JLabel nameLabel  = new JLabel();
+        private final JLabel priceLabel = new JLabel();
+
+        public ShopEntryRenderer() {
+            setLayout(new BorderLayout(8, 0));
+            JPanel textPanel = new JPanel(new BorderLayout());
+            textPanel.add(nameLabel, BorderLayout.WEST);
+            textPanel.add(priceLabel, BorderLayout.EAST);
+
+            add(iconLabel, BorderLayout.WEST);
+            add(textPanel, BorderLayout.CENTER);
+
+            nameLabel.setFont(new Font("맑은 고딕", Font.BOLD, 14));
+            priceLabel.setFont(new Font("맑은 고딕", Font.PLAIN, 13));
+        }
+
+        @Override
+        public Component getListCellRendererComponent(
+                JList<? extends ShopEntry> list,
+                ShopEntry value,
+                int index,
+                boolean isSelected,
+                boolean cellHasFocus) {
+
+            if (value != null) {
+                iconLabel.setIcon(value.icon);
+                nameLabel.setText(value.name);
+                priceLabel.setText(value.price + " G");
+            } else {
+                iconLabel.setIcon(null);
+                nameLabel.setText("");
+                priceLabel.setText("");
+            }
+
+            if (isSelected) {
+                setBackground(list.getSelectionBackground());
+                setForeground(list.getSelectionForeground());
+            } else {
+                setBackground(list.getBackground());
+                setForeground(list.getForeground());
+            }
+            setOpaque(true);
+            return this;
+        }
+    }
+
+    /** 리소스에서 아이콘 로드 (실패 시 null 반환) */
+    private ImageIcon loadIcon(String path) {
+        java.net.URL url = getClass().getResource(path);
+        if (url == null) {
+            // 리소스 경로 잘못되면 null 리턴하고 텍스트만 사용
+            System.err.println("Icon not found: " + path);
+            return null;
+        }
+        ImageIcon original = new ImageIcon(url);
+
+        int width = 32;
+        int height = 32;
+
+        Image scaledImg = original.getImage().getScaledInstance(width, height, Image.SCALE_SMOOTH);
+        return new ImageIcon(scaledImg);
+    }
+    // 마커용 아이콘 로드 (지뢰/상자 표시용, MARKER_SIZE 크기로)
+    private ImageIcon loadMarkerIcon(String path) {
+        java.net.URL url = getClass().getResource(path);
+        if (url == null) {
+            System.err.println("Marker icon not found: " + path);
+            return null;
+        }
+        ImageIcon original = new ImageIcon(url);
+        Image scaled = original.getImage().getScaledInstance(
+                MARKER_SIZE, MARKER_SIZE, Image.SCALE_SMOOTH
+        );
+        return new ImageIcon(scaled);
+    }
+}

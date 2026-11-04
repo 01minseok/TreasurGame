@@ -1,0 +1,284 @@
+package treasure;
+
+import javax.swing.*;
+import java.awt.*;
+import java.util.Random;
+
+public class TreasureMain extends JFrame {
+    private static final int GRID = 10;
+
+    private final Random rnd = new Random();
+    private final int treasureX;
+    private final int treasureY;
+
+    private int gold = 100;
+    private JLabel mainGoldLabel;
+    private JLabel gameGoldLabel;
+    private JLabel treasureGoldLabel;
+    private long startTime;
+
+    private Inventory inventory = new Inventory();
+    private InventoryPanel inventoryPanel;
+
+    private TreasureMap treasureMap;
+
+    private int playerX;
+    private int playerY;
+
+    private Shop shop;
+    //게임 시간
+
+    public long getStartTime() {
+        return startTime;
+    }
+    //게임 점수
+    private int score = 1000;
+    private JLabel scoreLabel;
+
+    public int getScore() { return score; }
+
+    public void addScore(int delta) {
+        score += delta;
+        if (score < 0) score = 0;
+        updateScoreLabel();
+
+        if (treasureMap != null) {
+            treasureMap.refreshScore();
+        }
+    }
+
+    private void updateScoreLabel() {
+        if (scoreLabel != null) {
+            scoreLabel.setText("Score: " + score);
+        }
+    }
+
+    public TreasureMap getTreasureMap() {
+        return treasureMap;
+    }
+
+    public void setPlayerPosition(int x, int y) {
+        this.playerX = x;
+        this.playerY = y;
+    }
+
+    public int getPlayerX() { return playerX; }
+    public int getPlayerY() { return playerY; }
+
+    public int getGold(){return gold;}
+    public void setGold(int g){gold = g; updateGoldLabels();}
+
+    //보물 좌표
+    public int getTreasureX() { return treasureX; }
+    public int getTreasureY() { return treasureY; }
+
+    public Inventory getInventory() { return inventory; }
+
+    public Shop getShop() { return shop; }
+
+    public void setGameGoldLabel(JLabel l) { this.gameGoldLabel = l; updateGoldLabels(); }
+    public void setTreasureGoldLabel(JLabel l) { this.treasureGoldLabel = l; updateGoldLabels(); }
+
+    //골드 업데이트
+    private void updateGoldLabels(){
+        if(mainGoldLabel != null){
+            mainGoldLabel.setText("Gold: " + gold+ "G");
+        }
+        if(gameGoldLabel != null){
+            gameGoldLabel.setText("Gold: " + gold+ "G");
+        }
+        if(treasureGoldLabel != null){
+            treasureGoldLabel.setText("Gold: " + gold+ "G");
+        }
+    }
+    //베팅
+    public boolean checkBet(int bet){
+        if(bet <= 0){
+            JOptionPane.showMessageDialog(this,"0보다 큰 골드를 베팅해야 합니다.","베팅 오류",JOptionPane.WARNING_MESSAGE);
+            return false;
+        }
+        if(bet > gold){
+            JOptionPane.showMessageDialog(this, "보유 골드가 부족합니다. (보유: " + gold + ")", "베팅 오류", JOptionPane.WARNING_MESSAGE);
+            return false;
+        }
+        return true;
+    }
+    //베팅 성공 여부
+    public void applyResult(int bet,int multiplier, boolean win){
+        if(win){
+            gold += bet *(multiplier - 1);
+        }else{
+            gold -= bet;
+        }
+        if(gold <0) gold = 0;
+        updateGoldLabels();
+    }
+
+    public class MainMenuPanel extends JPanel {
+        private Image background;
+        public MainMenuPanel(TreasureMain main) {
+
+            background = new ImageIcon(
+                    getClass().getResource("/treasure/icons/treasureMainsc.png")
+            ).getImage();
+
+            setLayout(null); // 버튼을 그림 위 원하는 위치에 직접 배치할 거라 null 레이아웃 사용
+
+            // ===== 리더보드 버튼 (화면 왼쪽 위에 작게) =====
+            JButton leaderboardButton = new JButton("랭킹");
+            leaderboardButton.setBounds(20, 50, 120, 40);
+
+            leaderboardButton.addActionListener(e -> {
+                Leaderboard.showOnly(main);   // ★ 리더보드 창 띄우기
+            });
+
+            // ===== 게임 버튼 (왼쪽 게임 건물 위) =====
+            JButton gameButton = new JButton("게임");
+            gameButton.setBounds(50, 300, 300, 300); // 좌표는 실행해보면서 조절!
+
+            // 배경만 보이게 버튼 투명 처리
+            gameButton.setFocusPainted(false);
+            gameButton.setContentAreaFilled(false);
+            gameButton.setBorderPainted(false);
+            gameButton.setForeground(new Color(0, 0, 0, 0));
+            gameButton.addActionListener(e -> {
+                new GameMap(main);
+            });
+
+            // ===== 상점 버튼 (오른쪽 상점 건물 위) =====
+            JButton shopButton = new JButton("상점");
+            shopButton.setBounds(900, 300, 300, 300); // 이것도 실행해서 위치 맞춰보기
+            shopButton.setFocusPainted(false);
+            shopButton.setContentAreaFilled(false);
+            shopButton.setBorderPainted(false);
+            shopButton.setForeground(new Color(0, 0, 0, 0));
+            shopButton.addActionListener(e -> {
+                // 상점 창 열기
+                new Shop(main).open();
+            });
+            // ===== 보물섬 버튼 (배 위에 투명 버튼) =====
+            JButton treasureButton = new JButton("보물섬");
+            treasureButton.setBounds(520, 130, 260, 100);
+            treasureButton.setFocusPainted(false);
+            treasureButton.setContentAreaFilled(false);
+            treasureButton.setBorderPainted(false);
+            treasureButton.setForeground(new Color(0, 0, 0, 0));
+
+            treasureButton.addActionListener(e -> {
+                int result = JOptionPane.showConfirmDialog(
+                        main,
+                        "정말로 보물 섬에 들어가시겠습니까?\n(한 번 들어가면 나올 수 없습니다.)",
+                        "보물 섬 입장",
+                        JOptionPane.YES_NO_OPTION,
+                        JOptionPane.WARNING_MESSAGE
+                );
+
+                if (result == JOptionPane.YES_OPTION) {
+                    // 보물섬 입장
+                    treasureMap = new TreasureMap(TreasureMain.this, getTreasureX(), getTreasureY());
+                }
+            });
+
+            add(gameButton);
+            add(shopButton);
+            add(treasureButton);
+            add(leaderboardButton);
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+            // 패널 크기에 맞게 배경 이미지 채우기
+            g.drawImage(background, 0, 0, getWidth(), getHeight(), this);
+        }
+    }
+
+    public void refreshInventoryPanel() {
+        if (inventoryPanel != null) {
+            inventoryPanel.refresh();
+        }
+    }
+    public boolean tryReviveWithEMP() {
+        Inventory inv = getInventory();
+
+        // 인벤토리 슬롯 순회
+        for (int i = 0; i < inv.getMaxSlots(); i++) {
+            Item item = inv.getItem(i);
+            if (item != null && "EMP 부츠".equals(item.name)) {
+                // 1. EMP 부츠 제거
+                inv.removeItem(i);
+
+                // 2. 메인 화면 인벤토리 새로고침
+                refreshInventoryPanel();
+
+                // 3. 보물섬 인벤토리도 떠있으면 같이 새로고침
+                if (treasureMap != null) {
+                    treasureMap.refreshMapInventory();
+                }
+                return true; // 부활 성공
+            }
+        }
+        return false; // EMP 부츠 없음 → 부활 불가
+    }
+
+    //ㅡㅡㅡㅡㅡㅡㅡㅡ메인 프레임ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+    public TreasureMain() {
+        setTitle("보물 찾기");
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+
+        treasureX = rnd.nextInt(600/GRID) * GRID;
+        treasureY = rnd.nextInt(600/GRID) * GRID;
+
+        shop = new Shop(this);
+
+        // ========= 배경 패널 =========
+        MainMenuPanel backgroundPanel = new MainMenuPanel(this);
+        backgroundPanel.setBounds(0, 0, 1280, 720);
+
+        // ========= UI =========
+        scoreLabel = new JLabel("Score: " + score);
+        scoreLabel.setFont(new Font("맑은 고딕", Font.BOLD, 22));
+        scoreLabel.setForeground(Color.black);
+        scoreLabel.setBounds(20, 10, 200, 40);
+
+        mainGoldLabel = new JLabel("Gold: " + gold + " G");
+        mainGoldLabel.setFont(new Font("맑은 고딕", Font.BOLD, 22));
+        mainGoldLabel.setForeground(Color.black);
+        mainGoldLabel.setBounds(1080, 10, 200, 40);
+
+        inventoryPanel = new InventoryPanel(inventory, TreasureMain.this);
+        inventoryPanel.setOpaque(false);
+        inventoryPanel.setBounds(100, 650, 1080, 50);
+
+        // ========= LayeredPane에 모두 올리기 =========
+        JLayeredPane layeredPane = new JLayeredPane();
+        layeredPane.setPreferredSize(new Dimension(1280, 720));
+
+        layeredPane.add(backgroundPanel, Integer.valueOf(0));
+        layeredPane.add(scoreLabel, Integer.valueOf(1));
+        layeredPane.add(mainGoldLabel, Integer.valueOf(1));
+        layeredPane.add(inventoryPanel, Integer.valueOf(1));
+
+        setContentPane(layeredPane);
+
+
+        // 타이머 유지
+        new Timer(10000, e -> {
+            gold += 1;
+            updateGoldLabels();
+        }).start();
+
+        new Timer(1000, e -> addScore(-1)).start();
+        startTime = System.currentTimeMillis();
+
+        setSize(1280, 750);
+        setLocationRelativeTo(null);
+        setVisible(true);
+    }
+
+
+
+    public static void main(String[] args) {
+        new TreasureMain();
+    }
+}

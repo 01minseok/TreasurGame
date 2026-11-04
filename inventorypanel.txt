@@ -1,0 +1,144 @@
+package treasure;
+
+import javax.swing.*;
+import java.awt.*;
+
+public class InventoryPanel extends JPanel {
+    private final TreasureMain main;
+    private final Inventory inventory;
+    private final JButton[] slotButtons;
+
+    // 🔹 인벤토리용 아이콘들 (경로는 네 프로젝트에 맞게 수정!)
+    private final Icon mapIcon;
+    private final Icon detectorIcon;
+    private final Icon mineSearchIcon;
+    private final Icon defuseIcon;
+    private final Icon empBootsIcon;
+    private final Icon stopIcon;
+
+    public InventoryPanel(Inventory inv, TreasureMain main) {
+        this.inventory = inv;
+        this.main = main;
+        setLayout(new GridLayout(1, inv.getMaxSlots(), 5, 5));
+
+        // 아이콘 로드 (경로는 실제 리소스 파일 이름으로 바꿔줘)
+        mapIcon       = loadIcon("/treasure/icons/map_item.png");          // 지도
+        detectorIcon  = loadIcon("/treasure/icons/treasuresr_item.png");     // 보물 탐지기
+        mineSearchIcon= loadIcon("/treasure/icons/minesr_item.png");   // 지뢰 탐색기
+        defuseIcon    = loadIcon("/treasure/icons/minede_item.png");       // 지뢰 해체기
+        empBootsIcon  = loadIcon("/treasure/icons/empbo_item.png");     // EMP 부츠
+        stopIcon = loadIcon("/treasure/icons/stop_item.png");
+        slotButtons = new JButton[inv.getMaxSlots()];
+
+        for (int i = 0; i < inv.getMaxSlots(); i++) {
+            int idx = i;
+            JButton b = new JButton("빈 슬롯");
+            b.setToolTipText(null);
+
+            // 텍스트를 아이콘 아래쪽에 오게 설정
+            b.setHorizontalTextPosition(SwingConstants.CENTER);
+            b.setVerticalTextPosition(SwingConstants.BOTTOM);
+
+            b.addActionListener(e -> {
+                Item it = inventory.getItem(idx);
+                if (it != null) {
+                    Component parent = SwingUtilities.getWindowAncestor(this);
+                    it.use(parent);            // 아이템 효과 실행
+                    inventory.removeItem(idx); // 사용 후 제거
+                    refresh();
+                    if (main != null) {
+                        main.refreshInventoryPanel();
+                    }
+                } else {
+                    JOptionPane.showMessageDialog(
+                            this,
+                            "이 슬롯은 빈 슬롯입니다.",
+                            "인벤토리",
+                            JOptionPane.INFORMATION_MESSAGE
+                    );
+                }
+            });
+
+            slotButtons[i] = b;
+            add(b);
+        }
+
+        refresh();
+    }
+
+    public void refresh() {
+        // 이 인벤토리 패널이 어떤 창에 붙어있는지 확인
+        Window window = SwingUtilities.getWindowAncestor(this);
+        boolean onMainScreen = window instanceof TreasureMain; // 메인 화면인지 여부
+
+        for (int i = 0; i < slotButtons.length; i++) {
+            Item it = inventory.getItem(i);
+            JButton btn = slotButtons[i];
+
+            if (it != null) {
+                btn.setText(it.name);
+                btn.setToolTipText(it.description);
+
+                // 🔹 아이템 이름에 따라 아이콘 설정
+                btn.setIcon(getIconForItem(it));
+
+                // ⭐ EMP 부츠는 항상 패시브 → 어디서든 비활성화
+                if ("EMP 부츠".equals(it.name)) {
+                    btn.setEnabled(false);
+                }
+                // ⭐ 메인 화면에서는 (EMP 말고 다른 아이템도) 사용 불가
+                else if (onMainScreen) {
+                    btn.setEnabled(false);
+                }
+                // 보물섬 인벤토리 등에서는 정상 사용 가능
+                else {
+                    btn.setEnabled(true);
+                }
+            } else {
+                // 빈 슬롯
+                btn.setText("빈 슬롯");
+                btn.setToolTipText(null);
+                btn.setIcon(null); // 아이콘 제거
+                // 빈 슬롯은 클릭해서 "빈 슬롯입니다" 안내 띄우는 용도로 활성화 유지
+                btn.setEnabled(true);
+            }
+        }
+    }
+
+    // ─────────────────────────────────────
+    //  아이템 이름 → 아이콘 매핑
+    // ─────────────────────────────────────
+    private Icon getIconForItem(Item it) {
+        String name = it.name;
+        if (name == null) return null;
+
+        return switch (name) {
+            case "지도"        -> mapIcon;
+            case "보물 탐지기" -> detectorIcon;
+            case "금속 탐색기" -> mineSearchIcon;
+            case "지뢰 해체기" -> defuseIcon;
+            case "EMP 부츠"    -> empBootsIcon;
+            case "멈춰" -> stopIcon;
+            default            -> null;
+        };
+    }
+
+    // ─────────────────────────────────────
+    //  아이콘 로드 + 크기 축소
+    // ─────────────────────────────────────
+    private ImageIcon loadIcon(String path) {
+        java.net.URL url = getClass().getResource(path);
+        if (url == null) {
+            System.err.println("Icon not found: " + path);
+            return null;
+        }
+        ImageIcon original = new ImageIcon(url);
+
+        int width = 32;   // 인벤토리 칸에 맞춰 조정 가능
+        int height = 32;
+
+        Image scaled = original.getImage().getScaledInstance(
+                width, height, Image.SCALE_SMOOTH);
+        return new ImageIcon(scaled);
+    }
+}

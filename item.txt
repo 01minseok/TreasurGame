@@ -1,0 +1,30 @@
+package treasure;
+
+
+import java.awt.*;
+
+public class Item {
+
+    // 이름, 설명, 사용 시 실행할 코드
+    String name;
+    String description;
+    Runnable onUse;   // 사용됐을 때 실행할 동작
+
+    public Item(String name, String description, Runnable onUse) {
+        this.name = name;
+        this.description = description;
+        this.onUse = onUse;
+    }
+
+    // 아이템 사용
+    public void use(Component parent) {
+        if (onUse != null) {
+            onUse.run();
+        }
+    }
+
+    @Override
+    public String toString() {
+        return name;
+    }
+}

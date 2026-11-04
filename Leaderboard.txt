@@ -1,0 +1,122 @@
+package treasure;
+
+import javax.swing.*;
+import java.io.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+public class Leaderboard {
+
+    private static final String FILE_NAME = "scores.txt"; // 프로젝트 폴더에 생성
+    private static final int MAX_ENTRIES = 10;            // 상위 10개만 유지
+
+    // 게임 끝났을 때 호출할 메소드
+    public static void recordScore(JFrame parent, int score) {
+        // 이름 입력받기 (취소하면 저장 안 함)
+        String name = JOptionPane.showInputDialog(
+                parent,
+                "리더보드에 등록할 이름을 입력하세요:",
+                "스코어 등록",
+                JOptionPane.PLAIN_MESSAGE
+        );
+        if (name == null) return; // 취소
+
+        name = name.trim();
+        if (name.isEmpty()) name = "Player";
+
+        List<Entry> list = load();
+
+        list.add(new Entry(name, score));
+        // 점수 내림차순 정렬
+        Collections.sort(list, (a, b) -> Integer.compare(b.score, a.score));
+
+        // 상위 10개만 남기기
+        if (list.size() > MAX_ENTRIES) {
+            list = list.subList(0, MAX_ENTRIES);
+        }
+
+        save(list);
+
+        // 저장 후 리더보드 보여주기
+        show(list, parent);
+    }
+
+    // 리더보드를 메뉴에서만 따로 보고 싶을 때 쓸 수 있는 메소드
+    public static void showOnly(JFrame parent) {
+        List<Entry> list = load();
+        show(list, parent);
+    }
+
+    // 파일에서 읽기
+    private static List<Entry> load() {
+        List<Entry> list = new ArrayList<>();
+        File f = new File(FILE_NAME);
+        if (!f.exists()) return list;
+
+        try (BufferedReader br = new BufferedReader(new FileReader(f))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                String[] parts = line.split("\t");
+                if (parts.length >= 2) {
+                    String name = parts[0];
+                    int score = Integer.parseInt(parts[1]);
+                    list.add(new Entry(name, score));
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return list;
+    }
+
+    // 파일에 쓰기
+    private static void save(List<Entry> list) {
+        try (PrintWriter out = new PrintWriter(new FileWriter(FILE_NAME))) {
+            for (Entry e : list) {
+                out.println(e.name + "\t" + e.score);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    // 리더보드 다이얼로그 띄우기
+    private static void show(List<Entry> list, JFrame parent) {
+        if (list.isEmpty()) {
+            JOptionPane.showMessageDialog(parent, "저장된 스코어가 없습니다.",
+                    "리더보드", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== Leaderboard ===\n\n");
+        int rank = 1;
+        for (Entry e : list) {
+            sb.append(rank++).append(". ")
+                    .append(e.name).append(" - ")
+                    .append(e.score).append("점\n");
+        }
+
+        JTextArea area = new JTextArea(sb.toString(), 15, 30);
+        area.setEditable(false);
+
+        JOptionPane.showMessageDialog(
+                parent,
+                new JScrollPane(area),
+                "리더보드",
+                JOptionPane.INFORMATION_MESSAGE
+        );
+    }
+
+    // 내부용 엔트리 클래스
+    private static class Entry {
+        String name;
+        int score;
+
+        Entry(String name, int score) {
+            this.name = name;
+            this.score = score;
+        }
+    }
+}

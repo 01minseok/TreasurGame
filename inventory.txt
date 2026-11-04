@@ -1,0 +1,43 @@
+package treasure;
+
+public class Inventory {
+
+    public static final int MAX_SLOTS = 4;
+    private final Item[] slots = new Item[MAX_SLOTS];
+
+    // 아이템 추가
+    public boolean addItem(Item item) {
+        for (int i = 0; i < MAX_SLOTS; i++) {
+            if (slots[i] == null) {
+                slots[i] = item;
+                return true;
+            }
+        }
+        return false; // 꽉 찼음
+    }
+
+    // 아이템 꺼내기
+    public Item getItem(int slotIndex) {
+        if (slotIndex >= 0 && slotIndex < MAX_SLOTS) {
+            return slots[slotIndex];
+        }
+        return null;
+    }
+
+    // 아이템 제거
+    public void removeItem(int slotIndex) {
+        if (slotIndex >= 0 && slotIndex < MAX_SLOTS) {
+            slots[slotIndex] = null;
+        }
+    }
+
+    public int getMaxSlots() {
+        return MAX_SLOTS;
+    }
+    public boolean isAllEmpty() {
+        for (Item item : slots) {
+            if (item != null) return false;
+        }
+        return true;
+    }
+}
